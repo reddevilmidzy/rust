@@ -2,7 +2,7 @@ fn retry() -> impl Sized {}
 
 struct Core<T>(T);
 
-impl Core<XXX> { //~ ERROR cannot find type 'XXX' in this scope
+impl Core<XXX> { //~ ERROR cannot find type `XXX` in this scope
     pub fn spawn(self) {}
 }
 
