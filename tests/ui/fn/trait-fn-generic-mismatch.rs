@@ -10,4 +10,3 @@ fn main() {
     let core = Core(1);
     core.spawn(retry()); //~ ERROR this method takes 0 arguments but 1 argument was supplied
 }
-
