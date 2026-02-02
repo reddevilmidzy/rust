@@ -745,6 +745,15 @@ impl<'tcx> dyn HirTyLowerer<'tcx> + '_ {
                                 // Avoid ICE #86756 when type error recovery goes awry.
                                 return Ty::new_error(tcx, prev).into();
                             }
+                            if preceding_args.is_empty()
+                                && tcx.type_of(param.def_id).skip_binder().has_param()
+                            {
+                                let guar = self.lowerer.dcx().span_delayed_bug(
+                                    self.span,
+                                    "default type has params but no args",
+                                );
+                                return Ty::new_error(tcx, guar).into();
+                            }
                             tcx.at(self.span)
                                 .type_of(param.def_id)
                                 .instantiate(tcx, preceding_args)
@@ -2798,8 +2807,27 @@ impl<'tcx> dyn HirTyLowerer<'tcx> + '_ {
         span: Span,
     ) -> Const<'tcx> {
         let tcx = self.tcx();
+        if let LitKind::Err(guar) = *kind {
+            return ty::Const::new_error(tcx, guar);
+        }
         let input = LitToConstInput { lit: *kind, ty, neg };
-        tcx.at(span).lit_to_const(input)
+        match tcx.at(span).lit_to_const(input) {
+            Some(value) => {
+                if value.ty == ty {
+                    ty::Const::new_value(tcx, value.valtree, value.ty)
+                } else {
+                    let e = tcx.dcx().span_err(
+                        span,
+                        format!("mismatched types: expected `{}`, found `{}`", ty, value.ty),
+                    );
+                    ty::Const::new_error(tcx, e)
+                }
+            }
+            None => {
+                let e = tcx.dcx().span_err(span, "type annotations needed for the literal");
+                ty::Const::new_error(tcx, e)
+            }
+        }
     }
 
     #[instrument(skip(self), level = "debug")]
@@ -2828,11 +2856,15 @@ impl<'tcx> dyn HirTyLowerer<'tcx> + '_ {
             _ => None,
         };
 
-        lit_input
-            // Allow the `ty` to be an alias type, though we cannot handle it here, we just go through
-            // the more expensive anon const code path.
-            .filter(|l| !l.ty.has_aliases())
-            .map(|l| tcx.at(expr.span).lit_to_const(l))
+        lit_input.and_then(|l| {
+            tcx.at(expr.span).lit_to_const(l).and_then(|value| {
+                if value.ty == ty {
+                    Some(ty::Const::new_value(tcx, value.valtree, value.ty))
+                } else {
+                    None
+                }
+            })
+        })
     }
 
     fn require_type_const_attribute(

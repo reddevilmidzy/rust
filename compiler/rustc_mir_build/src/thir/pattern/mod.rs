@@ -8,11 +8,12 @@ use std::cmp::Ordering;
 use std::sync::Arc;
 
 use rustc_abi::{FieldIdx, Integer};
+use rustc_ast::LitKind;
 use rustc_data_structures::assert_matches;
 use rustc_errors::codes::*;
 use rustc_hir::def::{CtorOf, DefKind, Res};
 use rustc_hir::pat_util::EnumerateAndAdjustIterator;
-use rustc_hir::{self as hir, RangeEnd};
+use rustc_hir::{self as hir, LangItem, RangeEnd};
 use rustc_index::Idx;
 use rustc_middle::mir::interpret::LitToConstInput;
 use rustc_middle::thir::{
@@ -197,8 +198,6 @@ impl<'tcx> PatCtxt<'tcx> {
         expr: Option<&'tcx hir::PatExpr<'tcx>>,
         ty: Ty<'tcx>,
     ) -> Result<(), ErrorGuaranteed> {
-        use rustc_ast::ast::LitKind;
-
         let Some(expr) = expr else {
             return Ok(());
         };
@@ -696,9 +695,61 @@ impl<'tcx> PatCtxt<'tcx> {
 
                 let pat_ty = self.typeck_results.node_type(pat.hir_id);
                 let lit_input = LitToConstInput { lit: lit.node, ty: pat_ty, neg: *negated };
-                let constant = self.tcx.at(expr.span).lit_to_const(lit_input);
+                let error_const = || {
+                    if let Some(guar) = self.typeck_results.tainted_by_errors {
+                        ty::Const::new_error(self.tcx, guar)
+                    } else {
+                        ty::Const::new_error_with_message(
+                            self.tcx,
+                            expr.span,
+                            "literal does not match expected type",
+                        )
+                    }
+                };
+                let constant = if self.const_lit_matches_ty(&lit.node, pat_ty, *negated) {
+                    match self.tcx.at(expr.span).lit_to_const(lit_input) {
+                        Some(value) => {
+                            let const_ty = if value.ty == pat_ty { value.ty } else { pat_ty };
+                            ty::Const::new_value(self.tcx, value.valtree, const_ty)
+                        }
+                        None => error_const(),
+                    }
+                } else {
+                    error_const()
+                };
                 self.const_to_pat(constant, pat_ty, expr.hir_id, lit.span)
             }
+        }
+    }
+
+    fn const_lit_matches_ty(&self, kind: &LitKind, ty: Ty<'tcx>, neg: bool) -> bool {
+        let tcx = self.tcx;
+        match (*kind, ty.kind()) {
+            (LitKind::Str(..), ty::Ref(_, inner_ty, _)) if inner_ty.is_str() => true,
+            (LitKind::Str(..), ty::Str) if tcx.features().deref_patterns() => true,
+            (LitKind::ByteStr(..), ty::Ref(_, inner_ty, _))
+                if let ty::Slice(ty) | ty::Array(ty, _) = inner_ty.kind()
+                    && matches!(ty.kind(), ty::Uint(ty::UintTy::U8)) =>
+            {
+                true
+            }
+            (LitKind::ByteStr(..), ty::Slice(inner_ty) | ty::Array(inner_ty, _))
+                if tcx.features().deref_patterns()
+                    && matches!(inner_ty.kind(), ty::Uint(ty::UintTy::U8)) =>
+            {
+                true
+            }
+            (LitKind::Byte(..), ty::Uint(ty::UintTy::U8)) => true,
+            (LitKind::CStr(..), ty::Ref(_, inner_ty, _)) if matches!(inner_ty.kind(), ty::Adt(def, _) if tcx.is_lang_item(def.did(), LangItem::CStr)) => {
+                true
+            }
+            (LitKind::Int(..), ty::Uint(_)) if !neg => true,
+            (LitKind::Int(..), ty::Int(_)) => true,
+            (LitKind::Bool(..), ty::Bool) => true,
+            (LitKind::Float(..), ty::Float(_)) => true,
+            (LitKind::Char(..), ty::Char) => true,
+            (LitKind::Err(..), _) => true,
+            _ => false,
         }
     }
 }

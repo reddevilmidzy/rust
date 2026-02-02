@@ -1006,8 +1006,20 @@ impl<'a, 'tcx> TypeVisitor<TyCtxt<'tcx>> for WfPredicates<'a, 'tcx> {
                         self.add_wf_preds_for_inherent_projection(uv.into());
                         return; // Subtree is handled by above function
                     } else {
-                        let obligations = self.nominal_obligations(uv.def, uv.args);
-                        self.out.extend(obligations);
+                        if uv.args.is_empty()
+                            && tcx
+                                .predicates_of(uv.def)
+                                .predicates
+                                .iter()
+                                .any(|(pred, _)| pred.has_param())
+                        {
+                            tcx.dcx().delayed_bug(
+                                "unevaluated const has predicates with params but no args",
+                            );
+                        } else {
+                            let obligations = self.nominal_obligations(uv.def, uv.args);
+                            self.out.extend(obligations);
+                        }
                     }
                 }
             }
