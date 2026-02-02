@@ -2803,8 +2803,17 @@ impl<'tcx> dyn HirTyLowerer<'tcx> + '_ {
         span: Span,
     ) -> Const<'tcx> {
         let tcx = self.tcx();
+        if let LitKind::Err(guar) = *kind {
+            return ty::Const::new_error(tcx, guar);
+        }
         let input = LitToConstInput { lit: *kind, ty, neg };
-        tcx.at(span).lit_to_const(input)
+        match tcx.at(span).lit_to_const(input) {
+            Some(value) => ty::Const::new_value(tcx, value.valtree, value.ty),
+            None => {
+                let e = tcx.dcx().span_err(span, "type annotations needed for the literal");
+                ty::Const::new_error(tcx, e)
+            }
+        }
     }
 
     #[instrument(skip(self), level = "debug")]
@@ -2833,11 +2842,49 @@ impl<'tcx> dyn HirTyLowerer<'tcx> + '_ {
             _ => None,
         };
 
-        lit_input
-            // Allow the `ty` to be an alias type, though we cannot handle it here, we just go through
-            // the more expensive anon const code path.
-            .filter(|l| !l.ty.has_aliases())
-            .map(|l| tcx.at(expr.span).lit_to_const(l))
+        lit_input.and_then(|l| {
+            if self.const_lit_matches_ty(&l.lit, l.ty, l.neg) {
+                tcx.at(expr.span)
+                    .lit_to_const(l)
+                    .map(|value| ty::Const::new_value(tcx, value.valtree, value.ty))
+            } else {
+                None
+            }
+        })
+    }
+
+    fn const_lit_matches_ty(&self, kind: &LitKind, ty: Ty<'tcx>, neg: bool) -> bool {
+        let tcx = self.tcx();
+        match (*kind, ty.kind()) {
+            (LitKind::Str(..), ty::Ref(_, inner_ty, _)) if inner_ty.is_str() => true,
+            (LitKind::Str(..), ty::Str) if tcx.features().deref_patterns() => true,
+            (LitKind::ByteStr(..), ty::Ref(_, inner_ty, _))
+                if let ty::Slice(ty) | ty::Array(ty, _) = inner_ty.kind()
+                    && matches!(ty.kind(), ty::Uint(ty::UintTy::U8)) =>
+            {
+                true
+            }
+            (LitKind::ByteStr(..), ty::Slice(inner_ty) | ty::Array(inner_ty, _))
+                if tcx.features().deref_patterns()
+                    && matches!(inner_ty.kind(), ty::Uint(ty::UintTy::U8)) =>
+            {
+                true
+            }
+            (LitKind::Byte(..), ty::Uint(ty::UintTy::U8)) => true,
+            (LitKind::CStr(..), ty::Ref(_, inner_ty, _))
+                if matches!(inner_ty.kind(),ty::Adt(def, _)
+                    if tcx.is_lang_item(def.did(), rustc_hir::LangItem::CStr)) =>
+            {
+                true
+            }
+            (LitKind::Int(..), ty::Uint(_)) if !neg => true,
+            (LitKind::Int(..), ty::Int(_)) => true,
+            (LitKind::Bool(..), ty::Bool) => true,
+            (LitKind::Float(..), ty::Float(_)) => true,
+            (LitKind::Char(..), ty::Char) => true,
+            (LitKind::Err(..), _) => true,
+            _ => false,
+        }
     }
 
     fn require_type_const_attribute(
