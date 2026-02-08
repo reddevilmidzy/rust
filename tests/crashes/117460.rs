@@ -6,3 +6,5 @@ struct Matrix<D = [(); 2 + 2]> {
 }
 
 impl Matrix {}
+
+fn main() {}

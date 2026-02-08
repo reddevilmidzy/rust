@@ -14,3 +14,5 @@ struct UwU<
     // here to suppress "unused generic" error if the code stops ICEing
     _x: core::marker::PhantomData<A>,
 }
+
+fn main() {}

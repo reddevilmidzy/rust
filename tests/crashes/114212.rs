@@ -2,7 +2,7 @@
 
 #![feature(generic_const_exprs)]
 
-use core::marker::PhantomData;
+use std::marker::PhantomData;
 
 pub const DEFAULT_MAX_INPUT_LEN: usize = 256;
 
@@ -32,3 +32,5 @@ where
         }
     }
 }
+
+fn main() {}

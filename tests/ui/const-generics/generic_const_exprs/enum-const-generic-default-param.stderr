@@ -1,0 +1,32 @@
+error: expected one of `!`, `(`, `.`, `::`, `;`, `<`, `?`, or `}`, found `,`
+  --> $DIR/enum-const-generic-default-param.rs:20:23
+   |
+LL |     A = t::<N>() as u8,
+   |                       ^ expected one of 8 possible tokens
+
+error: this relaxed bound is not permitted here
+  --> $DIR/enum-const-generic-default-param.rs:14:8
+   |
+LL |     T: ?Sized,
+   |        ^^^^^^
+   |
+   = note: in this context, relaxed bounds are only allowed on type parameters defined on the closest item
+
+error[E0599]: no variant or associated item named `B` found for enum `T<N>` in the current scope
+  --> $DIR/enum-const-generic-default-param.rs:10:50
+   |
+LL | enum T<const N: u8 = { T::<0>::A as u8 + T::<0>::B as u8 }>
+   | -------------------------------------------------^---------
+   | |                                                |
+   | |                                                variant or associated item not found in `T<0>`
+   | variant or associated item `B` not found for this enum
+   |
+help: there is a variant with a similar name
+   |
+LL - enum T<const N: u8 = { T::<0>::A as u8 + T::<0>::B as u8 }>
+LL + enum T<const N: u8 = { T::<0>::A as u8 + T::<0>::A as u8 }>
+   |
+
+error: aborting due to 3 previous errors
+
+For more information about this error, try `rustc --explain E0599`.

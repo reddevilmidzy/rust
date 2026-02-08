@@ -1,0 +1,37 @@
+error[E0308]: mismatched types
+  --> $DIR/generic_const_mismatched.rs:9:27
+   |
+LL | struct V<const U: usize = DEFAULT>
+   |                           ^^^^^^^ expected `usize`, found `u32`
+
+error[E0275]: overflow evaluating the requirement `S<{}> well-formed`
+  --> $DIR/generic_const_mismatched.rs:16:5
+   |
+LL |     S<{}>:;
+   |     ^^^^^
+   |
+note: required by a bound in `S`
+  --> $DIR/generic_const_mismatched.rs:16:5
+   |
+LL | struct S<const C: () = {}>()
+   |        - required by a bound in this struct
+LL | where
+LL |     S<{}>:;
+   |     ^^^^^ required by this bound in `S`
+
+error[E0308]: mismatched types
+  --> $DIR/generic_const_mismatched.rs:20:31
+   |
+LL | struct State<const S: usize = {}>
+   |                               ^^ expected `usize`, found `()`
+
+error[E0308]: mismatched types
+  --> $DIR/generic_const_mismatched.rs:25:32
+   |
+LL | struct State2<const S: usize = Foo>
+   |                                ^^^ expected `usize`, found `Foo`
+
+error: aborting due to 4 previous errors
+
+Some errors have detailed explanations: E0275, E0308.
+For more information about an error, try `rustc --explain E0275`.
